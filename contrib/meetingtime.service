@@ -1,0 +1,9 @@
+[Unit]
+Description=Meeting reminder daemon
+
+[Service]
+ExecStart=%h/.cargo/bin/meetingtime run
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
