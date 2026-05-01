@@ -17,7 +17,7 @@ pub async fn run() -> anyhow::Result<()> {
 
         let next = events
             .into_iter()
-            .find(|e| e.start > now && last_notified.map_or(true, |t| e.start != t));
+            .find(|e| e.start > now && last_notified != Some(e.start));
 
         let Some(event) = next else {
             println!("No upcoming events in the next 24h — rechecking in 30 minutes.");

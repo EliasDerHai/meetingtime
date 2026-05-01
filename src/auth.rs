@@ -1,11 +1,10 @@
 use std::path::PathBuf;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use chrono::{DateTime, Duration, Utc};
 use oauth2::{
-    basic::BasicClient, reqwest::async_http_client, AuthUrl, AuthorizationCode, ClientId,
-    ClientSecret, CsrfToken, PkceCodeChallenge, RedirectUrl, RefreshToken, Scope, TokenResponse,
-    TokenUrl,
+    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge, RedirectUrl,
+    RefreshToken, Scope, TokenResponse, TokenUrl, basic::BasicClient, reqwest::async_http_client,
 };
 use serde::{Deserialize, Serialize};
 
@@ -22,10 +21,10 @@ pub fn token_path() -> anyhow::Result<PathBuf> {
 }
 
 fn build_client() -> anyhow::Result<BasicClient> {
-    let client_id = std::env::var("GOOGLE_CLIENT_ID")
-        .context("GOOGLE_CLIENT_ID env var not set — create a Desktop app OAuth client in Google Cloud Console")?;
-    let client_secret = std::env::var("GOOGLE_CLIENT_SECRET")
-        .context("GOOGLE_CLIENT_SECRET env var not set")?;
+    let client_id = std::env::var("MEETINGTIME_CLIENT_ID")
+        .context("MEETINGTIME_CLIENT_ID env var not set — create a Desktop app OAuth client in Google Cloud Console")?;
+    let client_secret = std::env::var("MEETINGTIME_CLIENT_SECRET")
+        .context("MEETINGTIME_CLIENT_SECRET env var not set")?;
 
     let client = BasicClient::new(
         ClientId::new(client_id),
@@ -72,12 +71,7 @@ pub async fn run() -> anyhow::Result<()> {
     // Strip full redirect URL if the user pasted it instead of just the code value
     let code = if let Some(pos) = code.find("code=") {
         let after = &code[pos + 5..];
-        after
-            .split('&')
-            .next()
-            .unwrap_or(after)
-            .trim()
-            .to_string()
+        after.split('&').next().unwrap_or(after).trim().to_string()
     } else {
         code
     };
@@ -94,9 +88,11 @@ pub async fn run() -> anyhow::Result<()> {
         .unwrap_or(std::time::Duration::from_secs(3600));
     let expires_at = Utc::now() + Duration::from_std(expires_in)?;
 
-    let refresh_token = token_response
-        .refresh_token()
-        .ok_or_else(|| anyhow!("no refresh_token in response — ensure access_type=offline and prompt=consent were set"))?;
+    let refresh_token = token_response.refresh_token().ok_or_else(|| {
+        anyhow!(
+            "no refresh_token in response — ensure access_type=offline and prompt=consent were set"
+        )
+    })?;
 
     let token = Token {
         access_token: token_response.access_token().secret().clone(),

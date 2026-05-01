@@ -1,7 +1,10 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "meetingtime", about = "Google Calendar meeting reminder daemon")]
+#[command(
+    name = "meetingtime",
+    about = "Google Calendar meeting reminder daemon"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
