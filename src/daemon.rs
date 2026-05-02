@@ -73,12 +73,25 @@ pub async fn run() -> anyhow::Result<()> {
     let mut opened: Vec<Event> = Vec::default();
     let mut token = auth::load_token()?;
     let config = load_config()?;
+    let (clicked_tx, mut clicked_rx) = tokio::sync::mpsc::channel::<Event>(8);
 
     loop {
+        while let Ok(clicked_event) = clicked_rx.try_recv() {
+            if !opened.contains(&clicked_event) {
+                opened.push(clicked_event);
+            }
+        }
+
         token = auth::refresh_if_needed(token).await?;
 
-        let events = calendar::fetch_upcoming(&token.access_token).await?;
-        println!("fetched: {:?}", events);
+        let events = match calendar::fetch_upcoming(&token.access_token).await {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("fetch failed (will retry): {e:#}");
+                sleep(config.daemon_loop.to_std()?).await;
+                continue;
+            }
+        };
         let now = Utc::now();
 
         let next = events.into_iter().find(|e| e.start > now);
@@ -94,7 +107,7 @@ pub async fn run() -> anyhow::Result<()> {
 
         if !notified.contains(&event) && event.start <= now + config.notify_before_meeting {
             notified.push(event.clone());
-            notify::fire(&event.title, event.join_url.as_deref())?;
+            notify::fire(&event, clicked_tx.clone())?;
         }
 
         if !opened.contains(&event)
