@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use anyhow::{Context, anyhow};
+use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Duration, Utc};
 use oauth2::{
     AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge, RedirectUrl,
@@ -15,12 +15,12 @@ pub struct Token {
     pub expires_at: DateTime<Utc>,
 }
 
-pub fn token_path() -> anyhow::Result<PathBuf> {
+pub fn token_path() -> Result<PathBuf> {
     let base = dirs::data_dir().ok_or_else(|| anyhow!("could not determine data directory"))?;
     Ok(base.join("meetingtime").join("token.json"))
 }
 
-fn build_client() -> anyhow::Result<BasicClient> {
+fn build_client() -> Result<BasicClient> {
     let client_id = std::env::var("MEETINGTIME_CLIENT_ID")
         .context("MEETINGTIME_CLIENT_ID env var not set — create a Desktop app OAuth client in Google Cloud Console")?;
     let client_secret = std::env::var("MEETINGTIME_CLIENT_SECRET")
@@ -43,7 +43,7 @@ fn build_client() -> anyhow::Result<BasicClient> {
     Ok(client)
 }
 
-pub async fn run() -> anyhow::Result<()> {
+pub async fn run() -> Result<()> {
     let client = build_client()?;
 
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
@@ -105,7 +105,7 @@ pub async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn load_token() -> anyhow::Result<Token> {
+pub fn load_token() -> Result<Token> {
     let path = token_path()?;
     let json = std::fs::read_to_string(&path).with_context(|| {
         format!(
@@ -116,7 +116,7 @@ pub fn load_token() -> anyhow::Result<Token> {
     serde_json::from_str(&json).context("token file is malformed")
 }
 
-pub async fn refresh_if_needed(token: Token) -> anyhow::Result<Token> {
+pub async fn refresh_if_needed(token: Token) -> Result<Token> {
     if token.expires_at - Utc::now() > Duration::minutes(5) {
         return Ok(token);
     }
@@ -147,7 +147,7 @@ pub async fn refresh_if_needed(token: Token) -> anyhow::Result<Token> {
     Ok(new_token)
 }
 
-fn persist_token(token: &Token) -> anyhow::Result<()> {
+fn persist_token(token: &Token) -> Result<()> {
     let path = token_path()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)

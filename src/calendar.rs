@@ -2,6 +2,7 @@ use anyhow::Context;
 use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Event {
     pub title: String,
     pub start: DateTime<Utc>,
@@ -69,9 +70,11 @@ pub async fn fetch_upcoming(access_token: &str) -> anyhow::Result<Vec<Event>> {
         .unwrap_or_default()
         .into_iter()
         .filter(|raw| {
-            raw.attendees
-                .iter()
-                .any(|a| a.is_self && a.response_status == "accepted")
+            raw.attendees.is_empty()
+                || raw
+                    .attendees
+                    .iter()
+                    .any(|a| a.is_self && a.response_status == "accepted")
         })
         .filter_map(|raw| {
             let start_str = raw.start.date_time.or(raw.start.date)?;

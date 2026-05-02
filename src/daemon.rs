@@ -1,50 +1,110 @@
-use chrono::{DateTime, Utc};
+use anyhow::{Context, Result, anyhow};
+use chrono::{Duration, Utc};
+use serde::{Deserialize, Serialize};
+use std::fs::{create_dir_all, read_to_string, write};
 use tokio::time::sleep;
 
-use crate::{auth, calendar, notify};
+use crate::{
+    auth,
+    calendar::{self, Event},
+    notify,
+};
 
-const REMINDER_MINUTES: i64 = 5;
+#[derive(Debug, Deserialize, Serialize)]
+struct Config {
+    notify_before_meeting: Duration,
+    auto_open_before_meeting: Duration,
+    daemon_loop: Duration,
+    daemon_idle_loop: Duration,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            notify_before_meeting: Duration::minutes(5),
+            auto_open_before_meeting: Duration::minutes(1),
+            daemon_loop: Duration::seconds(15),
+            daemon_idle_loop: Duration::minutes(5),
+        }
+    }
+}
+
+fn load_config() -> Result<Config> {
+    let config_path = dirs::config_dir()
+        .map(|base| base.join("meetingtime").join("config.json"))
+        .ok_or_else(|| anyhow!("could not determine data directory"))?;
+
+    let config = match config_path.try_exists()? {
+        // exists -> load and return
+        true => {
+            let json = read_to_string(&config_path).with_context(|| {
+                format!(
+                    "config not found at {} — run `meetingtime auth` first",
+                    config_path.display()
+                )
+            })?;
+
+            serde_json::from_str(&json).context("config file is malformed")?
+        }
+        // doesn't exist -> save default and return default
+        false => {
+            if let Some(parent) = config_path.parent() {
+                create_dir_all(parent)
+                    .with_context(|| format!("could not create directory {}", parent.display()))?;
+            }
+            let default_config = Config::default();
+            let json = serde_json::to_string_pretty(&default_config)?;
+            write(&config_path, json).with_context(|| {
+                format!(
+                    "could not write default config to {}",
+                    config_path.display()
+                )
+            })?;
+
+            default_config
+        }
+    };
+
+    Ok(config)
+}
 
 pub async fn run() -> anyhow::Result<()> {
-    let mut last_notified: Option<DateTime<Utc>> = None;
+    let mut notified: Vec<Event> = Vec::default();
+    let mut opened: Vec<Event> = Vec::default();
+    let mut token = auth::load_token()?;
+    let config = load_config()?;
 
     loop {
-        let token = auth::load_token()?;
-        let token = auth::refresh_if_needed(token).await?;
+        token = auth::refresh_if_needed(token).await?;
 
         let events = calendar::fetch_upcoming(&token.access_token).await?;
+        println!("fetched: {:?}", events);
         let now = Utc::now();
 
-        let next = events
-            .into_iter()
-            .find(|e| e.start > now && last_notified != Some(e.start));
+        let next = events.into_iter().find(|e| e.start > now);
 
         let Some(event) = next else {
-            println!("No upcoming events in the next 24h — rechecking in 30 minutes.");
-            sleep(std::time::Duration::from_secs(30 * 60)).await;
+            println!(
+                "No upcoming events in the next 24h - sleeping for {:?}.",
+                config.daemon_idle_loop
+            );
+            sleep(config.daemon_idle_loop.to_std()?).await;
             continue;
         };
 
-        let notify_at = event.start - chrono::Duration::minutes(REMINDER_MINUTES);
-        let wait = (notify_at - Utc::now()).to_std().unwrap_or_default();
+        if !notified.contains(&event) && event.start <= now + config.notify_before_meeting {
+            notified.push(event.clone());
+            notify::fire(&event.title, event.join_url.as_deref())?;
+        }
 
-        println!(
-            "Next: \"{}\" at {} — notifying in {:.0}m",
-            event.title,
-            event.start.format("%H:%M UTC"),
-            wait.as_secs_f64() / 60.0,
-        );
+        if !opened.contains(&event)
+            && let Some(ref url) = event.join_url
+            && event.start <= now + config.auto_open_before_meeting
+        {
+            opened.push(event.clone());
+            let _ = open::that(url);
+        }
 
-        sleep(wait).await;
-
-        notify::fire(&event.title, event.join_url.as_deref())?;
-        last_notified = Some(event.start);
-
-        // Sleep until 1 minute after the meeting starts before looping,
-        // so we don't re-fire for the same event.
-        let until_past = (event.start + chrono::Duration::minutes(1) - Utc::now())
-            .to_std()
-            .unwrap_or_default();
-        sleep(until_past).await;
+        sleep(config.daemon_loop.to_std()?).await;
     }
 }

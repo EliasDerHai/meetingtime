@@ -10,10 +10,5 @@ pub fn fire(title: &str, join_url: Option<&str>) -> anyhow::Result<()> {
         .show()
         .context("failed to show notification")?;
 
-    // Open the browser immediately — more reliable than waiting for a button click.
-    if let Some(url) = join_url {
-        let _ = open::that(url);
-    }
-
     Ok(())
 }
