@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Duration as StdDuration;
 
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Duration, Utc};
@@ -7,6 +8,9 @@ use oauth2::{
     RefreshToken, Scope, TokenResponse, TokenUrl, basic::BasicClient, reqwest::async_http_client,
 };
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+use tokio::time::timeout;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Token {
@@ -62,19 +66,8 @@ pub async fn run() -> Result<()> {
     if open::that(auth_url.as_str()).is_err() {
         println!("Could not open browser automatically. Open this URL manually:\n\n  {auth_url}\n");
     }
-    println!("\nAfter authorizing, paste the full redirect URL (or just the `code=` value) here:");
 
-    let mut code = String::new();
-    std::io::stdin().read_line(&mut code)?;
-    let code = code.trim().to_string();
-
-    // Strip full redirect URL if the user pasted it instead of just the code value
-    let code = if let Some(pos) = code.find("code=") {
-        let after = &code[pos + 5..];
-        after.split('&').next().unwrap_or(after).trim().to_string()
-    } else {
-        code
-    };
+    let code = get_auth_code().await?;
 
     let token_response = client
         .exchange_code(AuthorizationCode::new(code))
@@ -103,6 +96,57 @@ pub async fn run() -> Result<()> {
     persist_token(&token)?;
     println!("Token saved to {}", token_path()?.display());
     Ok(())
+}
+
+fn parse_code(text: &str) -> Result<String> {
+    let pos = text
+        .find("code=")
+        .ok_or_else(|| anyhow!("no code= found — did you paste the right URL?"))?;
+    let after = &text[pos + 5..];
+    let code = after
+        .split(|c| c == '&' || c == ' ')
+        .next()
+        .unwrap_or(after)
+        .trim();
+    Ok(code.to_string())
+}
+
+async fn wait_for_redirect(listener: TcpListener) -> Result<String> {
+    let (mut stream, _) = listener.accept().await?;
+
+    let mut buf = [0u8; 4096];
+    let n = stream.read(&mut buf).await?;
+    let request = std::str::from_utf8(&buf[..n]).context("redirect request was not valid UTF-8")?;
+
+    let code = parse_code(request)?;
+
+    let body = "<html><body><h2>Authorization successful!</h2>\
+                <p>You can close this tab and return to the terminal.</p></body></html>";
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream.write_all(response.as_bytes()).await?;
+
+    Ok(code)
+}
+
+async fn get_auth_code() -> Result<String> {
+    match TcpListener::bind("127.0.0.1:8080").await {
+        Ok(listener) => {
+            println!("Waiting for browser redirect on http://localhost:8080 ...");
+            timeout(StdDuration::from_secs(300), wait_for_redirect(listener))
+                .await
+                .context("timed out after 5 minutes waiting for OAuth redirect")?
+        }
+        Err(_) => {
+            println!("Port 8080 is in use. After authorizing, paste the redirect URL here:");
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line)?;
+            parse_code(line.trim())
+        }
+    }
 }
 
 pub fn load_token() -> Result<Token> {
