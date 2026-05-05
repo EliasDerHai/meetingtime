@@ -1177,6 +1177,7 @@ dependencies = [
  "chrono",
  "clap",
  "dirs",
+ "mac-notification-sys",
  "notify-rust",
  "oauth2",
  "open",
