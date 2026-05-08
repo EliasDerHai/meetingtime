@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs::{create_dir_all, read_to_string, write};
 use tokio::time::sleep;
 
@@ -69,22 +70,21 @@ fn load_config() -> Result<Config> {
 }
 
 pub async fn run() -> anyhow::Result<()> {
-    let mut notified: Vec<Event> = Vec::default();
-    let mut opened: Vec<Event> = Vec::default();
+    let mut notified: HashSet<Event> = HashSet::new();
+    let mut opened: HashSet<Event> = HashSet::new();
     let mut token = auth::load_token()?;
     let config = load_config()?;
+    let http_client = reqwest::Client::new();
     let (clicked_tx, mut clicked_rx) = tokio::sync::mpsc::channel::<Event>(8);
 
     loop {
         while let Ok(clicked_event) = clicked_rx.try_recv() {
-            if !opened.contains(&clicked_event) {
-                opened.push(clicked_event);
-            }
+            opened.insert(clicked_event);
         }
 
         token = auth::refresh_if_needed(token).await?;
 
-        let events = match calendar::fetch_upcoming(&token.access_token).await {
+        let events = match calendar::fetch_upcoming(&http_client, &token.access_token).await {
             Ok(e) => e,
             Err(e) => {
                 eprintln!("fetch failed (will retry): {e:#}");
@@ -93,6 +93,10 @@ pub async fn run() -> anyhow::Result<()> {
             }
         };
         let now = Utc::now();
+
+        // Prune events that have already passed
+        notified.retain(|e| e.start > now);
+        opened.retain(|e| e.start > now);
 
         let next = events.into_iter().find(|e| e.start > now);
 
@@ -106,7 +110,7 @@ pub async fn run() -> anyhow::Result<()> {
         };
 
         if !notified.contains(&event) && event.start <= now + config.notify_before_meeting {
-            notified.push(event.clone());
+            notified.insert(event.clone());
             notify::fire(&event, clicked_tx.clone())?;
         }
 
@@ -114,7 +118,7 @@ pub async fn run() -> anyhow::Result<()> {
             && let Some(ref url) = event.join_url
             && event.start <= now + config.auto_open_before_meeting
         {
-            opened.push(event.clone());
+            opened.insert(event.clone());
             let _ = open::that(url);
         }
 

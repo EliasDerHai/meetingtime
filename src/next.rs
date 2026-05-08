@@ -3,7 +3,8 @@ use crate::{auth, calendar};
 pub async fn run() -> anyhow::Result<()> {
     let token = auth::load_token()?;
     let token = auth::refresh_if_needed(token).await?;
-    let events = calendar::fetch_upcoming(&token.access_token).await?;
+    let client = reqwest::Client::new();
+    let events = calendar::fetch_upcoming(&client, &token.access_token).await?;
     let now = chrono::Utc::now();
     match events.into_iter().find(|e| e.start > now) {
         Some(e) => {

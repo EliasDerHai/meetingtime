@@ -2,7 +2,7 @@ use anyhow::Context;
 use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Event {
     pub title: String,
     pub start: DateTime<Utc>,
@@ -42,11 +42,13 @@ struct RawTime {
     date: Option<String>,
 }
 
-pub async fn fetch_upcoming(access_token: &str) -> anyhow::Result<Vec<Event>> {
+pub async fn fetch_upcoming(
+    client: &reqwest::Client,
+    access_token: &str,
+) -> anyhow::Result<Vec<Event>> {
     let now = Utc::now();
     let time_max = now + Duration::hours(24);
 
-    let client = reqwest::Client::new();
     let resp = client
         .get("https://www.googleapis.com/calendar/v3/calendars/primary/events")
         .bearer_auth(access_token)
