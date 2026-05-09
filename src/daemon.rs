@@ -75,14 +75,16 @@ pub async fn run() -> anyhow::Result<()> {
     let mut token = auth::load_token()?;
     let config = load_config()?;
     let http_client = reqwest::Client::new();
+    let auth_client = auth::build_client()?;
+
     let (clicked_tx, mut clicked_rx) = tokio::sync::mpsc::channel::<Event>(8);
 
     loop {
-        while let Ok(clicked_event) = clicked_rx.try_recv() {
+        if let Ok(clicked_event) = clicked_rx.try_recv() {
             opened.insert(clicked_event);
         }
 
-        token = auth::refresh_if_needed(token).await?;
+        token = auth::refresh_if_needed(&auth_client, token).await?;
 
         let events = match calendar::fetch_upcoming(&http_client, &token.access_token).await {
             Ok(e) => e,

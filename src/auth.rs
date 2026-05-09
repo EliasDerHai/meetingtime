@@ -24,7 +24,7 @@ pub fn token_path() -> Result<PathBuf> {
     Ok(base.join("meetingtime").join("token.json"))
 }
 
-fn build_client() -> Result<BasicClient> {
+pub fn build_client() -> Result<BasicClient> {
     let client_id = std::env::var("MEETINGTIME_CLIENT_ID")
         .context("MEETINGTIME_CLIENT_ID env var not set — create a Desktop app OAuth client in Google Cloud Console")?;
     let client_secret = std::env::var("MEETINGTIME_CLIENT_SECRET")
@@ -103,11 +103,7 @@ fn parse_code(text: &str) -> Result<String> {
         .find("code=")
         .ok_or_else(|| anyhow!("no code= found — did you paste the right URL?"))?;
     let after = &text[pos + 5..];
-    let code = after
-        .split(|c| c == '&' || c == ' ')
-        .next()
-        .unwrap_or(after)
-        .trim();
+    let code = after.split(['&', ' ']).next().unwrap_or(after).trim();
     Ok(code.to_string())
 }
 
@@ -160,12 +156,11 @@ pub fn load_token() -> Result<Token> {
     serde_json::from_str(&json).context("token file is malformed")
 }
 
-pub async fn refresh_if_needed(token: Token) -> Result<Token> {
+pub async fn refresh_if_needed(client: &BasicClient, token: Token) -> Result<Token> {
     if token.expires_at - Utc::now() > Duration::minutes(5) {
         return Ok(token);
     }
 
-    let client = build_client()?;
     let token_response = client
         .exchange_refresh_token(&RefreshToken::new(token.refresh_token.clone()))
         .request_async(async_http_client)
