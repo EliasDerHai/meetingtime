@@ -24,7 +24,9 @@ pub fn fire(event: &Event, clicked_tx: Sender<Event>) -> anyhow::Result<()> {
         // mac_notification_sys::send(), so we drive mac_notification_sys directly.
         // send() is blocking — run it off the async executor.
         tokio::task::spawn_blocking(move || {
-            use mac_notification_sys::{MainButton, Notification as MacNotif, NotificationResponse};
+            use mac_notification_sys::{
+                MainButton, Notification as MacNotif, NotificationResponse,
+            };
             let mut n = MacNotif::default();
             n.title(&summary)
                 .message(url.as_str())
@@ -39,7 +41,10 @@ pub fn fire(event: &Event, clicked_tx: Sender<Event>) -> anyhow::Result<()> {
     #[cfg(not(target_os = "macos"))]
     {
         let mut notification = notify_rust::Notification::new();
-        notification.summary(&summary).body(&url).action("join", "Join");
+        notification
+            .summary(&summary)
+            .body(&url)
+            .action("join", "Join");
         let handle = notification.show().context("failed to show notification")?;
         tokio::spawn(async move {
             let mut join_clicked = false;
