@@ -41,7 +41,7 @@ pub fn build_client() -> Result<BasicClient> {
         ),
     )
     .set_redirect_uri(
-        RedirectUrl::new("http://localhost:8080".to_string()).context("invalid redirect URL")?,
+        RedirectUrl::new("http://127.0.0.1:8080".to_string()).context("invalid redirect URL")?,
     );
 
     Ok(client)
